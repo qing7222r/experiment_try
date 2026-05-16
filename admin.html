@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>管理后台 - 行为实验</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        .admin-table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 14px; }
+        .admin-table th, .admin-table td { border: 1px solid #ddd; padding: 8px 10px; text-align: center; }
+        .admin-table th { background: #4a90d9; color: #fff; position: sticky; top: 0; }
+        .admin-table tr:nth-child(even) { background: #f9f9f9; }
+        .admin-table tr:hover { background: #e8f4fd; }
+        .table-wrapper { max-height: 500px; overflow-y: auto; border: 1px solid #ddd; border-radius: 8px; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; margin-bottom: 20px; }
+        .stat-card { background: #f0f7ff; border-radius: 8px; padding: 15px; text-align: center; }
+        .stat-card .stat-value { font-size: 28px; font-weight: bold; color: #4a90d9; }
+        .stat-card .stat-label { font-size: 13px; color: #666; margin-top: 4px; }
+        .high-badge { background: #e74c3c; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 12px; }
+        .low-badge { background: #3498db; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 12px; }
+        .btn-csv { margin-bottom: 15px; }
+    </style>
+</head>
+<body>
+    <div class="container admin-container">
+        <h1>管理后台</h1>
+        <div class="admin-header">
+            <a href="/" class="btn btn-secondary">返回首页</a>
+            <button id="refresh-btn" class="btn btn-primary">刷新数据</button>
+            <button id="csv-btn" class="btn btn-primary btn-csv">导出 CSV</button>
+        </div>
+
+        <div id="stats-area" class="stats-grid"></div>
+
+        <h2>会话记录</h2>
+        <div class="table-wrapper">
+            <table class="admin-table">
+                <thead>
+                    <tr>
+                        <th>被试编号</th>
+                        <th>分组</th>
+                        <th>显示基线</th>
+                        <th>P1 总数</th>
+                        <th>P1 答对</th>
+                        <th>P1 积分</th>
+                        <th>P2 总数</th>
+                        <th>P2 答对</th>
+                        <th>ε</th>
+                        <th>P2 调整积分</th>
+                        <th>比较结果</th>
+                        <th>时间</th>
+                    </tr>
+                </thead>
+                <tbody id="sessions-tbody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        const GROUP_LABELS = { high_volatility: '高波动组', low_volatility: '低波动组' };
+
+        async function loadData() {
+            const [sessionsResp, statsResp] = await Promise.all([
+                fetch('/api/admin/sessions'),
+                fetch('/api/admin/stats')
+            ]);
+            const sessions = await sessionsResp.json();
+            const stats = await statsResp.json();
+
+            // 统计卡片
+            document.getElementById('stats-area').innerHTML = `
+                <div class="stat-card">
+                    <div class="stat-value">${stats.total_sessions}</div>
+                    <div class="stat-label">总被试数</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${stats.high_volatility}</div>
+                    <div class="stat-label">高波动组</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${stats.low_volatility}</div>
+                    <div class="stat-label">低波动组</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${stats.avg_phase1_correct}</div>
+                    <div class="stat-label">第一阶段平均答对</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${stats.avg_phase2_correct}</div>
+                    <div class="stat-label">第二阶段平均答对</div>
+                </div>
+            `;
+
+            // 会话表格
+            const tbody = document.getElementById('sessions-tbody');
+            tbody.innerHTML = sessions.map(s => `
+                <tr>
+                    <td>${s.participant_id || '-'}</td>
+                    <td><span class="${s.group_type === 'high_volatility' ? 'high-badge' : 'low-badge'}">${GROUP_LABELS[s.group_type] || '-'}</span></td>
+                    <td>${s.show_baseline === 'true' ? '是' : '否'}</td>
+                    <td>${s.phase1_total}</td>
+                    <td>${s.phase1_correct}</td>
+                    <td>${s.phase1_score}</td>
+                    <td>${s.phase2_total}</td>
+                    <td>${s.phase2_correct}</td>
+                    <td>${s.epsilon}</td>
+                    <td>${s.phase2_adjusted}</td>
+                    <td>${s.phase2_comparison === 'high' ? '高奖金' : s.phase2_comparison === 'low' ? '低奖金' : '-'}</td>
+                    <td>${s.created_at ? new Date(s.created_at).toLocaleString('zh-CN') : '-'}</td>
+                </tr>
+            `).join('');
+        }
+
+        function exportCSV() {
+            fetch('/api/admin/sessions')
+                .then(r => r.json())
+                .then(sessions => {
+                    const headers = ['被试编号', '分组', '显示基线', 'P1总数', 'P1答对', 'P1积分', 'P2总数', 'P2答对', 'ε', 'P2调整积分', '比较结果', '时间'];
+                    const rows = sessions.map(s => [
+                        s.participant_id,
+                        GROUP_LABELS[s.group_type] || '',
+                        s.show_baseline === 'true' ? '是' : '否',
+                        s.phase1_total,
+                        s.phase1_correct,
+                        s.phase1_score,
+                        s.phase2_total,
+                        s.phase2_correct,
+                        s.epsilon,
+                        s.phase2_adjusted,
+                        s.phase2_comparison === 'high' ? '高奖金' : s.phase2_comparison === 'low' ? '低奖金' : '',
+                        s.created_at
+                    ]);
+                    const csv = [headers, ...rows].map(row => row.join(',')).join('\n');
+                    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = 'experiment_data.csv';
+                    a.click();
+                });
+        }
+
+        document.getElementById('refresh-btn').addEventListener('click', loadData);
+        document.getElementById('csv-btn').addEventListener('click', exportCSV);
+        loadData();
+    </script>
+</body>
+</html>
